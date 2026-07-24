@@ -1,0 +1,9 @@
+Package: com.0xkuj.fixwanotifs
+Name: FixWANotifs
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Raises the Jetsam memory limit of WhatsApp's notification ServiceExtension in order to fix missing notifications while WhatsApp is closed. Userspace reboot is needed after install
+Maintainer: 0xkuj
+Author: 0xkuj
+Section: Tweaks
+Depends: ellekit

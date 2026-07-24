@@ -1,0 +1,11 @@
+#!/bin/sh
+
+if { [ "$1" = remove ] || [ "$1" = purge ]; } && [ -n "$CYDIA" ]; then
+    fd="${CYDIA%% *}"
+    version="${CYDIA#* }"
+    if [ "$version" = 1 ]; then
+        echo "finish:usreboot" >&"$fd"
+    fi
+fi
+
+exit 0
