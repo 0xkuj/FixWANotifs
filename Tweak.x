@@ -16,13 +16,23 @@
 #import <mach-o/dyld.h>
 #import <os/log.h>
 #import <dispatch/dispatch.h>
+#import <Foundation/Foundation.h>
+#import <rootless.h>
+#import <roothide.h>
 
 // iOS's default limit for the extension; only a request equal to this is rewritten.
 #define FIXWA_CANDIDATE_MIB 24
 
-// New limit. If notifications still drop and a per-process-limit JetsamEvent still
-// appears for the extension, raise this (48 / 64 / 96) and rebuild.
+// Default new limit, used when no preference is set. The prefs bundle can override this
+// with 40 / 72 / 96 MiB (applied on the next runningboardd launch, i.e. after a reboot).
 #define FIXWA_TARGET_MIB    40
+
+// jbroot() resolves the path on both Dopamine and RootHide.
+#define FIXWA_PREFS_PATH jbroot(@"/var/mobile/Library/Preferences/com.0xkuj.fixwanotifsprefs.plist")
+
+// Settings, resolved once at load.
+static BOOL g_enabled    = YES;
+static int  g_target_mib = FIXWA_TARGET_MIB;
 
 // ---- memorystatus_control -----------------------------------------------------
 #define MEMORYSTATUS_CMD_SET_JETSAM_HIGH_WATER_MARK 5
@@ -80,8 +90,8 @@ static int hooked_memorystatus_control(uint32_t command, int32_t pid, uint32_t f
         if ((active_is_candidate || inactive_is_candidate) && fixwa_is_target_pid(pid)) {
             // Local copy — the caller's buffer is never mutated.
             memorystatus_memlimit_properties_t local = *props;
-            if (active_is_candidate)   local.memlimit_active   = FIXWA_TARGET_MIB;
-            if (inactive_is_candidate) local.memlimit_inactive = FIXWA_TARGET_MIB;
+            if (active_is_candidate)   local.memlimit_active   = g_target_mib;
+            if (inactive_is_candidate) local.memlimit_inactive = g_target_mib;
 
             int rv = orig_memorystatus_control(command, pid, flags, &local, buffersize);
             //os_log(fixwa_log(), "FixWANotifs: rewrote WhatsApp SE (pid %d) %d MiB -> %d MiB (rv=%d)", pid, FIXWA_CANDIDATE_MIB, FIXWA_TARGET_MIB, rv);
@@ -113,11 +123,20 @@ static bool fixwa_in_runningboardd(void) {
     return (plen >= nlen && strcmp(path + (plen - nlen), name) == 0);
 }
 
+static void fixwa_load_prefs(void) {
+    NSMutableDictionary *prefs = [[NSMutableDictionary alloc] initWithContentsOfFile:FIXWA_PREFS_PATH];
+    g_enabled = prefs[@"Enabled"] ? [prefs[@"Enabled"] boolValue] : YES;
+    int v = prefs[@"JetsamLimit"] ? [prefs[@"JetsamLimit"] intValue] : FIXWA_TARGET_MIB;
+    g_target_mib = (v == 40 || v == 72 || v == 96) ? v : FIXWA_TARGET_MIB;
+}
+
 %ctor {
     if (!fixwa_in_runningboardd()) return;
+
+    fixwa_load_prefs();
+    if (!g_enabled) return;        // tweak disabled in settings
+
     MSHookFunction((void *)memorystatus_control,
                    (void *)hooked_memorystatus_control,
                    (void **)&orig_memorystatus_control);
-
-    //os_log(fixwa_log(), "FixWANotifs: hook installed in runningboardd (target %d MiB)", FIXWA_TARGET_MIB);
 }
